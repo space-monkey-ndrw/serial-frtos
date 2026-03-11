@@ -1,0 +1,7 @@
+/home/ndrwldr/n64-code/serial-frtos/build/CMakeFiles/serial-frtos.dir
+/home/ndrwldr/n64-code/serial-frtos/build/CMakeFiles/edit_cache.dir
+/home/ndrwldr/n64-code/serial-frtos/build/CMakeFiles/rebuild_cache.dir
+/home/ndrwldr/n64-code/serial-frtos/build/cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir
+/home/ndrwldr/n64-code/serial-frtos/build/cmake/stm32cubemx/CMakeFiles/FreeRTOS.dir
+/home/ndrwldr/n64-code/serial-frtos/build/cmake/stm32cubemx/CMakeFiles/edit_cache.dir
+/home/ndrwldr/n64-code/serial-frtos/build/cmake/stm32cubemx/CMakeFiles/rebuild_cache.dir
