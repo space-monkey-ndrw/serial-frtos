@@ -46,7 +46,7 @@ Power           X1202       RPi 5           GPIO/USB-C          5V/5A Power Deli
 
 3. Software Interface & Data Protocols
 3.1. STM32 to IMU (Local Bus)
-    Protocol: I2C.
+Protocol: I2C.
     Sample Rate: 200 Hz (Fixed).
     Data Processed: STM32 runs Madgwick Filter locally using its Floating Point Unit (FPU).
 3.2. STM32 to Raspberry Pi (Transport Layer)
@@ -89,22 +89,24 @@ I2C3: PB3 (SCL), PA8 (SDA)
 
 Wiring:
 TB6612 -> wire color -> Nucleo-64 -> STM32 -> code
-PWMA		brown		D7			PA8			PWMA_Pin and PWMA_GPIO_Port aka TIM1_CH1 aka PWMA
-AIN2		red			D4			PB5			AIN2_Pin and AIN2_GPIO_Port aka AIN2
-AIN1		orange		D5			PB4			AIN1_Pin and AIN1_GPIO_Port aka AIN1
-STBY		blue		D6			PB10		STBY_Pin and STBY_GPIO_Port aka STBY
-BIN1		green		D2			PA10		BIN1_Pin and BIN1_GPIO_Port aka BIN1
-BIN2		yellow		D9			PC7			BIN2_Pin and BIN2_GPIO_Port aka BIN2
-PWMB		white		D8			PA9			PWMB_Pin and PWMB_GPIO_Port aka TIM1_CH2 aka PWMB
-GND			purple		GND			GND
-Vcc			gray		3.3V		3.3V
+PWMA        brown        D7            PA8            PWMA_Pin and PWMA_GPIO_Port aka TIM1_CH1 aka PWMA
+AIN2        red            D4            PB5            AIN2_Pin and AIN2_GPIO_Port aka AIN2
+AIN1        orange        D5            PB4            AIN1_Pin and AIN1_GPIO_Port aka AIN1
+STBY        blue        D6            PB10        STBY_Pin and STBY_GPIO_Port aka STBY
+BIN1        green        D2            PA10        BIN1_Pin and BIN1_GPIO_Port aka BIN1
+BIN2        yellow        D9            PC7            BIN2_Pin and BIN2_GPIO_Port aka BIN2
+PWMB        white        D8            PA9            PWMB_Pin and PWMB_GPIO_Port aka TIM1_CH2 aka PWMB
+GND            purple        GND            GND
+Vcc            gray        3.3V        3.3V
 
 Adafruit LSM6DSOX + LIS3MDL FeatherWing - Precision 9-DoF IMU
-IMU     -> wire color -> Nucleo-64  -> code
-SDA*        header (f)      SCL
-SCL*        header (f)      SDA
-3.3V        orange          3V3
-GND         green           GND
+--------------------------------------
+| IMU  | wire color | Nucleo-64  | code |
+| SDA* | header (f) | SCL        |
+| SCL* | header (f) | SDA        |
+| 3.3V | orange     | 3V3        |
+| GND  | green      | GND        |
+---------------------------------------
 * note - SDA and SCL silkscreen labels are swapped on this IMU *
 
 
