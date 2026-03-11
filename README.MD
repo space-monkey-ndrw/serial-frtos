@@ -99,14 +99,15 @@ PWMB        white        D8            PA9            PWMB_Pin and PWMB_GPIO_Por
 GND            purple        GND            GND
 Vcc            gray        3.3V        3.3V
 
-Adafruit LSM6DSOX + LIS3MDL FeatherWing - Precision 9-DoF IMU
---------------------------------------
-| IMU  | wire color | Nucleo-64  | code |
-| SDA* | header (f) | SCL        |
-| SCL* | header (f) | SDA        |
-| 3.3V | orange     | 3V3        |
-| GND  | green      | GND        |
----------------------------------------
+-----------------------------------------------------------------
+| Adafruit LSM6DSOX + LIS3MDL FeatherWing - Precision 9-DoF IMU |
+-----------------------------------------------------------------
+| IMU       | wire color      | Nucleo-64     | code            |
+| SDA*      | header (f)      | SCL           |                 |
+| SCL*      | header (f)      | SDA           |                 |
+| 3.3V      | orange          | 3V3           |                 |
+| GND       | green           | GND           |                 |
+-----------------------------------------------------------------
 * note - SDA and SCL silkscreen labels are swapped on this IMU *
 
 
