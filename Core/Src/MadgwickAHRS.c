@@ -50,6 +50,19 @@ void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float 
 	float hx, hy;
 	float _2q0mx, _2q0my, _2q0mz, _2q1mx, _2bx, _2bz, _4bx, _4bz, _2q0, _2q1, _2q2, _2q3, _2q0q2, _2q2q3, q0q0, q0q1, q0q2, q0q3, q1q1, q1q2, q1q3, q2q2, q2q3, q3q3;
 
+	/* Print sensor values for testing
+	print_val2("gx: ", gx);
+	print_val2("gy: ", gy);
+	print_val2("gz: ", gz);
+	print_val2("ax: ", ax);
+	print_val2("ay: ", ay);
+	print_val2("az: ", az);
+	print_val2("mx: ", mx);
+	print_val2("my: ", my);
+	print_val2("mz: ", mz);
+	HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+	*/
+
 	// Use IMU algorithm if magnetometer measurement invalid (avoids NaN in magnetometer normalisation)
 	if((mx == 0.0f) && (my == 0.0f) && (mz == 0.0f)) {
 		MadgwickAHRSupdateIMU(gx, gy, gz, ax, ay, az);
@@ -66,16 +79,16 @@ void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float 
 	if(!((ax == 0.0f) && (ay == 0.0f) && (az == 0.0f))) {
 
 		// Normalise accelerometer measurement
-		recipNorm = Cordic_InvSqrt(ax * ax + ay * ay + az * az);
-		ax *= recipNorm;
-		ay *= recipNorm;
-		az *= recipNorm;   
+		recipNorm = sqrtf(ax * ax + ay * ay + az * az);
+		ax /= recipNorm;
+		ay /= recipNorm;
+		az /= recipNorm;   
 
 		// Normalise magnetometer measurement
-		recipNorm = Cordic_InvSqrt(mx * mx + my * my + mz * mz);
-		mx *= recipNorm;
-		my *= recipNorm;
-		mz *= recipNorm;
+		recipNorm = sqrtf(mx * mx + my * my + mz * mz);
+		mx /= recipNorm;
+		my /= recipNorm;
+		mz /= recipNorm;
 
 		// Auxiliary variables to avoid repeated arithmetic
 		_2q0mx = 2.0f * q0 * mx;
@@ -103,7 +116,7 @@ void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float 
 		hx = mx * q0q0 - _2q0my * q3 + _2q0mz * q2 + mx * q1q1 + _2q1 * my * q2 + _2q1 * mz * q3 - mx * q2q2 - mx * q3q3;
 		hy = _2q0mx * q3 + my * q0q0 - _2q0mz * q1 + _2q1mx * q2 - my * q1q1 + my * q2q2 + _2q2 * mz * q3 - my * q3q3;
 		volatile float sumHs = hx * hx + hy * hy;
-		_2bx = Cordic_Sqrt(sumHs);
+		_2bx = sqrtf(sumHs);
 		_2bz = -_2q0mx * q2 + _2q0my * q1 + mz * q0q0 + _2q1mx * q3 - mz * q1q1 + _2q2 * my * q3 - mz * q2q2 + mz * q3q3;
 		_4bx = 2.0f * _2bx;
 		_4bz = 2.0f * _2bz;
@@ -113,11 +126,11 @@ void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float 
 		s1 = _2q3 * (2.0f * q1q3 - _2q0q2 - ax) + _2q0 * (2.0f * q0q1 + _2q2q3 - ay) - 4.0f * q1 * (1 - 2.0f * q1q1 - 2.0f * q2q2 - az) + _2bz * q3 * (_2bx * (0.5f - q2q2 - q3q3) + _2bz * (q1q3 - q0q2) - mx) + (_2bx * q2 + _2bz * q0) * (_2bx * (q1q2 - q0q3) + _2bz * (q0q1 + q2q3) - my) + (_2bx * q3 - _4bz * q1) * (_2bx * (q0q2 + q1q3) + _2bz * (0.5f - q1q1 - q2q2) - mz);
 		s2 = -_2q0 * (2.0f * q1q3 - _2q0q2 - ax) + _2q3 * (2.0f * q0q1 + _2q2q3 - ay) - 4.0f * q2 * (1 - 2.0f * q1q1 - 2.0f * q2q2 - az) + (-_4bx * q2 - _2bz * q0) * (_2bx * (0.5f - q2q2 - q3q3) + _2bz * (q1q3 - q0q2) - mx) + (_2bx * q1 + _2bz * q3) * (_2bx * (q1q2 - q0q3) + _2bz * (q0q1 + q2q3) - my) + (_2bx * q0 - _4bz * q2) * (_2bx * (q0q2 + q1q3) + _2bz * (0.5f - q1q1 - q2q2) - mz);
 		s3 = _2q1 * (2.0f * q1q3 - _2q0q2 - ax) + _2q2 * (2.0f * q0q1 + _2q2q3 - ay) + (-_4bx * q3 + _2bz * q1) * (_2bx * (0.5f - q2q2 - q3q3) + _2bz * (q1q3 - q0q2) - mx) + (-_2bx * q0 + _2bz * q2) * (_2bx * (q1q2 - q0q3) + _2bz * (q0q1 + q2q3) - my) + _2bx * q1 * (_2bx * (q0q2 + q1q3) + _2bz * (0.5f - q1q1 - q2q2) - mz);
-		recipNorm = Cordic_InvSqrt(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3); // normalise step magnitude
-		s0 *= recipNorm;
-		s1 *= recipNorm;
-		s2 *= recipNorm;
-		s3 *= recipNorm;
+		recipNorm = sqrtf(s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3); // normalise step magnitude
+		s0 /= recipNorm;
+		s1 /= recipNorm;
+		s2 /= recipNorm;
+		s3 /= recipNorm;
 
 		// Apply feedback step
 		qDot1 -= beta * s0;
@@ -133,11 +146,21 @@ void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float 
 	q3 += qDot4 * (1.0f / sampleFreq);
 
 	// Normalise quaternion
-	recipNorm = Cordic_InvSqrt(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
-	q0 *= recipNorm;
-	q1 *= recipNorm;
-	q2 *= recipNorm;
-	q3 *= recipNorm;
+	recipNorm = sqrtf(q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3);
+	q0 /= recipNorm;
+	q1 /= recipNorm;
+	q2 /= recipNorm;
+	q3 /= recipNorm;
+
+	// HAL_UART_Transmit(&huart2, (uint8_t*)"AHRS", 2, 10);
+	// HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+	/* print quaternion values  for debugging 
+	print_val2("q0: ", q0);
+	print_val2("q1: ", q1);
+	print_val2("q2: ", q2);
+	print_val2("q3: ", q3);
+	HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+	*/
 }
 
 //---------------------------------------------------------------------------------------------------
@@ -148,6 +171,16 @@ void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, flo
 	float s0, s1, s2, s3;
 	float qDot1, qDot2, qDot3, qDot4;
 	float _2q0, _2q1, _2q2, _2q3, _4q0, _4q1, _4q2 ,_8q1, _8q2, q0q0, q1q1, q2q2, q3q3;
+
+	/* Print sensor values for testing
+	print_val2("gx: ", gx);
+	print_val2("gy: ", gy);
+	print_val2("gz: ", gz);
+	print_val2("ax: ", ax);
+	print_val2("ay: ", ay);
+	print_val2("az: ", az);
+	HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+	*/
 
 	// Rate of change of quaternion from gyroscope
 	qDot1 = 0.5f * (-q1 * gx - q2 * gy - q3 * gz);
@@ -161,12 +194,12 @@ void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, flo
 		// Normalise accelerometer measurement
 		volatile float sumAs = ax * ax + ay * ay + az * az;
 		if (testCounter % 10 == 0) {
-			print_val2("sumAs", sumAs);
+			// print_val2("sumAs", sumAs);
 		}
-		recipNorm = Cordic_InvSqrt(sumAs);
-		ax *= recipNorm;
-		ay *= recipNorm;
-		az *= recipNorm;   
+		recipNorm = sqrtf(sumAs);
+		ax /= recipNorm;
+		ay /= recipNorm;
+		az /= recipNorm;   
 
 		// Auxiliary variables to avoid repeated arithmetic
 		_2q0 = 2.0f * q0;
@@ -190,13 +223,13 @@ void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, flo
 		s3 = 4.0f * q1q1 * q3 - _2q1 * ax + 4.0f * q2q2 * q3 - _2q2 * ay;
 		volatile float sumSs = s0 * s0 + s1 * s1 + s2 * s2 + s3 * s3;
 		if (testCounter % 10 == 0) {
-			print_val2("sumSs", sumSs);
+			// print_val2("sumSs", sumSs);
 		}
-		recipNorm = Cordic_InvSqrt(sumSs); // normalise step magnitude
-		s0 *= recipNorm;
-		s1 *= recipNorm;
-		s2 *= recipNorm;
-		s3 *= recipNorm;
+		recipNorm = sqrtf(sumSs); // normalise step magnitude
+		s0 /= recipNorm;
+		s1 /= recipNorm;
+		s2 /= recipNorm;
+		s3 /= recipNorm;
 
 		// Apply feedback step
 		qDot1 -= beta * s0;
@@ -214,16 +247,25 @@ void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, flo
 	// Normalise quaternion
 	volatile float sumQs = q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3;
 	if (testCounter % 10 == 0) {
-		print_val2("sumQs", sumQs);
-		char buffer[8];
-		HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+		// print_val2("sumQs", sumQs);
+		// HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
 	}
-	recipNorm = Cordic_InvSqrt(sumQs);
-	q0 *= recipNorm;
-	q1 *= recipNorm;
-	q2 *= recipNorm;
-	q3 *= recipNorm;
+	recipNorm = sqrtf(sumQs);
+	q0 /= recipNorm;
+	q1 /= recipNorm;
+	q2 /= recipNorm;
+	q3 /= recipNorm;
 	testCounter++;
+
+	/* print quaternion values for debugging 
+	// HAL_UART_Transmit(&huart2, (uint8_t*)"IMU", 2, 10);
+	// HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+	print_val2("q0: ", q0);
+	print_val2("q1: ", q1);
+	print_val2("q2: ", q2);
+	print_val2("q3: ", q3);
+	HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+	*/
 }
 
 void print_val2(char* label, float val) {

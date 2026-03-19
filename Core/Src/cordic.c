@@ -21,7 +21,9 @@
 #include "cordic.h"
 
 /* USER CODE BEGIN 0 */
-
+// Constants for RM0440 n=0 constraints in Q1.31
+#define CORDIC_MIN_Q31 0x0374BC6A  // 0.027 * 2^31
+#define CORDIC_MAX_Q31 0x60000000  // 0.75  * 2^31
 /* USER CODE END 0 */
 
 CORDIC_HandleTypeDef hcordic;
@@ -124,21 +126,43 @@ float Cordic_InvSqrt(volatile float x) {
     return 1.0f / result_sqrt;
 }
 
-float Cordic_Sqrt(float x) {
-    if (x <= 0.0f) return 0.0f;
-    CORDIC_ConfigTypeDef sConfig = {0};
-    int32_t input_q31, output_q31;
+float Cordic_Sqrt(float input_f) {
+    if (input_f <= 0.0f) return 0.0f;
 
-    // Configure for Square Root (requires input in [0, 1] range)
-    sConfig.Function = CORDIC_FUNCTION_SQUAREROOT;
-    sConfig.Precision = CORDIC_PRECISION_6CYCLES; // Adjust for accuracy/speed
-    sConfig.NbWrite = CORDIC_NBWRITE_1;
-    sConfig.NbRead = CORDIC_NBREAD_1;
-    HAL_CORDIC_Configure(&hcordic, &sConfig);
+    // 1. Convert float to a 64-bit bit-pattern (Q31 representation)
+    // We use 64-bit to prevent overflow when input_f > 1.0
+    int64_t bits = (int64_t)(input_f * 2147483648.0);
+    int32_t k = 0; // This tracks the output shift
 
-    // Scale float to q31, calculate, and convert back
-    input_q31 = (int32_t)(x * 2147483648.0f);
-    HAL_CORDIC_CalculateZO(&hcordic, &input_q31, &output_q31, 1, HAL_MAX_DELAY);
-    return (float)output_q31 / 2147483648.0f;
+    // 2. NORMALIZE into [0.027, 0.75] using EVEN bit-shifts
+    if (bits > CORDIC_MAX_Q31) {
+        // Too big: Shift RIGHT by 2 (Input / 4), track k (Result * 2)
+        while (bits > CORDIC_MAX_Q31) {
+            bits >>= 2;
+            k++; 
+        }
+    } else if (bits < CORDIC_MIN_Q31) {
+        // Too small: Shift LEFT by 2 (Input * 4), track k (Result / 2)
+        while (bits < CORDIC_MIN_Q31) {
+            bits <<= 2;
+            k--;
+        }
+    }
+
+    // 3. CORDIC OPERATION (n=0)
+    CORDIC->WDATA = (int32_t)bits;
+    // Wait/Read Result
+    int32_t result_q31 = CORDIC->RDATA;
+
+    // 4. BIT-SHIFT CORRECTION
+    // The relationship is: sqrt(x * 2^(2k)) = sqrt(x) * 2^k
+    float res_f = (float)result_q31 / 2147483648.0f;
+
+    // If we shifted input right (k > 0), result is too small; multiply by 2^k
+    // If we shifted input left (k < 0), result is too big; divide by 2^k
+    if (k > 0) return res_f * (float)(1 << k);
+    if (k < 0) return res_f / (float)(1 << (-k));
+    
+    return res_f;
 }
 /* USER CODE END 1 */

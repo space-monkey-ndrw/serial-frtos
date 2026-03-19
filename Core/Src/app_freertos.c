@@ -57,6 +57,16 @@ extern uint8_t mag_buf[6];  // 6 bytes for Mag
 extern float gx, gy, gz;
 extern float ax, ay, az;
 extern float mx, my, mz;
+volatile int16_t raw_gx;
+volatile int16_t raw_gy;
+volatile int16_t raw_gz;
+volatile int16_t raw_ax;
+volatile int16_t raw_ay;
+volatile int16_t raw_az;
+volatile int16_t raw_mx;
+volatile int16_t raw_my;
+volatile int16_t raw_mz;
+extern float q0, q1, q2, q3; // Quaternion components from Madgwick filter
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -89,7 +99,8 @@ void Motor_B_Stop(void);
 void Motors_Fwd(int);
 void Motors_Back(int);
 void Motors_Stop(void);
-void print_val(char* label, float val);
+void print_val_float(char* label, float val);
+void print_val(char* label, int16_t val);
 void parse_imu_data(uint8_t *imu_buf);
 void parse_mag_data(uint8_t *mag_buf);
 /* USER CODE END FunctionPrototypes */
@@ -301,23 +312,30 @@ void StartMadgwickTask(void *argument)
       MadgwickAHRSupdateIMU(gx, gy, gz, ax, ay, az);
     }
 
+    // send quaternion over UART
+    char buffer[64];
+    sprintf(buffer, "q: %f, %f, %f, %f\r\n", q0, q1, q2, q3);
+    HAL_UART_Transmit(&huart2, (uint8_t*)buffer, strlen(buffer), 10);
+    
     test_counter++;
 
-    /* output for testing
+    // output for testing
+    /*
     if (test_counter > 5) {
       test_counter = 0;
-      print_val("AX", ax);
-      print_val("AY", ay);
-      print_val("AZ", az);
-      print_val("GX", gx);
-      print_val("GY", gy);
-      print_val("GZ", gz);
-      print_val("MX", mx);
-      print_val("MY", my);
-      print_val("MZ", mz);
-      HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+      print_val("raw_ax", raw_ax);
+      print_val("raw_ay", raw_ay);
+      print_val("raw_az", raw_az);
+      print_val("raw_gx", raw_gx);
+      print_val("raw_gy", raw_gy);
+      print_val("raw_gz", raw_gz);
+      print_val("raw_mx", raw_mx);
+      print_val("raw_my", raw_my);
+      print_val("raw_mz", raw_mz);
+      HAL_UART_Transmit(&huart2, (uint8_t*)"\n", 2, 10);
     }
-      */
+    //end of output for testing
+    */
 
     // 5. Quaternion is now updated.  Prepare for Serial Bridge.
     //    pack 'q[0,3]' into ROS2 message and/or send over UART for debugging.
@@ -327,7 +345,16 @@ void StartMadgwickTask(void *argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-void print_val(char* label, float val) {
+void print_val(char* label, int16_t val) {
+    char msg[64];
+    char sign = (val >= 0) ? ' ' : '-';
+    if (val < 0) val = -val; // Make val positive for printing
+    // Standard sprintf (no floats) is much smaller than float-enabled printf
+    int len = sprintf(msg, "%s: %c%ld ", label, sign, val);
+    HAL_UART_Transmit(&huart2, (uint8_t*)msg, len, 10);
+}
+
+void print_val_float(char* label, float val) {
     char msg[32];
     char sign = (val >= 0) ? ' ' : '-';
     if (val < 0) val = -val; // Make val positive for printing
@@ -341,20 +368,22 @@ void print_val(char* label, float val) {
 
 void parse_imu_data(uint8_t imu_buf[12]) {
   // measured offsets:
+  
   float gx_offset = -0.46944f;
   float gy_offset = 0.52472f;
   float gz_offset = -0.27444f;
   float ax_offset = -0.01726f;
   float ay_offset = -0.04193f;
   float az_offset = -0.00174f;
+  
 
   // DS12814 Rev 4: Gyro (0x22-0x27) comes BEFORE Accel (0x28-0x2D)
-  int16_t raw_gx = (int16_t)((imu_buf[1] << 8) | imu_buf[0]);
-  int16_t raw_gy = (int16_t)((imu_buf[3] << 8) | imu_buf[2]);
-  int16_t raw_gz = (int16_t)((imu_buf[5] << 8) | imu_buf[4]);
-  int16_t raw_ax = (int16_t)((imu_buf[7] << 8) | imu_buf[6]);
-  int16_t raw_ay = (int16_t)((imu_buf[9] << 8) | imu_buf[8]);
-  int16_t raw_az = (int16_t)((imu_buf[11] << 8) | imu_buf[10]);
+  raw_gx = (int16_t)((imu_buf[1] << 8) | imu_buf[0]);
+  raw_gy = (int16_t)((imu_buf[3] << 8) | imu_buf[2]);
+  raw_gz = (int16_t)((imu_buf[5] << 8) | imu_buf[4]);
+  raw_ax = (int16_t)((imu_buf[7] << 8) | imu_buf[6]);
+  raw_ay = (int16_t)((imu_buf[9] << 8) | imu_buf[8]);
+  raw_az = (int16_t)((imu_buf[11] << 8) | imu_buf[10]);
 
   // 3. Conversion to physical units
   // +/- 2000dps: 70 mdps/LSB = 0.070 dps/LSB
@@ -363,10 +392,10 @@ void parse_imu_data(uint8_t imu_buf[12]) {
   gz = (float)raw_gz * 0.070f - gz_offset;
   // convert to rad/s for Madgwick filter
   gx *= 0.0174533f; // π/180
-  gy *= 0.0174533f;
-  gz *= 0.0174533f;
+  gy *= 0.0174533f; // π/180
+  gz *= 0.0174533f; // π/180
 
-  // Convert to mg (at ±2g range, sensitivity is 0.061 mg/LSB)
+  // Convert to g (at ±2g range, sensitivity is 0.061 mg/LSB)
   // +/- 2g: 0.061 mg/LSB = 0.000061 g/LSB
   ax = (float)raw_ax * 0.000061f - ax_offset;
   ay = (float)raw_ay * 0.000061f - ay_offset;
@@ -379,9 +408,9 @@ void parse_mag_data(uint8_t mag_buf[6]) {
   float my_offset = -0.12533f;
   float mz_offset = -0.044f;
 
-  int16_t raw_mx = (int16_t)((mag_buf[1] << 8) | mag_buf[0]);
-  int16_t raw_my = (int16_t)((mag_buf[3] << 8) | mag_buf[2]);
-  int16_t raw_mz = (int16_t)((mag_buf[5] << 8) | mag_buf[4]);
+  raw_mx = (int16_t)((mag_buf[1] << 8) | mag_buf[0]);
+  raw_my = (int16_t)((mag_buf[3] << 8) | mag_buf[2]);
+  raw_mz = (int16_t)((mag_buf[5] << 8) | mag_buf[4]);
   // Mag (Registers 0x28 to 0x2D)
   // Convert to Gauss (at ±4 Gauss range, sensitivity is 6842 LSB/Gauss)
   mx = (float)raw_mx / 6842.0f - mx_offset;
