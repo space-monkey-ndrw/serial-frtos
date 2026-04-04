@@ -53,9 +53,6 @@ __IO uint32_t BspButtonState = BUTTON_RELEASED;
 /* USER CODE BEGIN PV */
 uint8_t imu_buf[12]; // 6 bytes for Gyro, 6 for Accel
 uint8_t mag_buf[6];  // 6 bytes for Mag
-float gx, gy, gz;
-float ax, ay, az;
-float mx, my, mz;
 volatile uint8_t mag_pending = 0;
 /* USER CODE END PV */
 

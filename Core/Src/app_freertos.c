@@ -35,7 +35,11 @@
 /* Private typedef -----------------------------------------------------------*/
 typedef StaticTask_t osStaticThreadDef_t;
 /* USER CODE BEGIN PTD */
-
+typedef struct __attribute__((packed)) {
+  float accel_x, accel_y, accel_z;
+  float gyro_x, gyro_y, gyro_z;
+  float qw, qx, qy, qz;
+} ImuPacket_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -54,19 +58,16 @@ extern __IO uint32_t BspButtonState;
 extern I2C_HandleTypeDef hi2c1; // Declare the I2C handle defined in i2c.c
 extern uint8_t imu_buf[12]; // 6 bytes for Gyro, 6 for Accel
 extern uint8_t mag_buf[6];  // 6 bytes for Mag
-extern float gx, gy, gz;
-extern float ax, ay, az;
-extern float mx, my, mz;
-volatile int16_t raw_gx;
-volatile int16_t raw_gy;
-volatile int16_t raw_gz;
-volatile int16_t raw_ax;
-volatile int16_t raw_ay;
-volatile int16_t raw_az;
-volatile int16_t raw_mx;
-volatile int16_t raw_my;
-volatile int16_t raw_mz;
-extern float q0, q1, q2, q3; // Quaternion components from Madgwick filter
+float gx, gy, gz;
+float ax, ay, az;
+float mx, my, mz;
+volatile int16_t raw_gx, raw_gy, raw_gz;
+volatile int16_t raw_ax, raw_ay, raw_az;
+volatile int16_t raw_mx, raw_my, raw_mz;
+extern volatile float q0, q1, q2, q3; // Quaternion components from Madgwick filter
+ImuPacket_t imu_packet;
+// size is 40 Bytes + 1 (COBS overhead) + 1 (0x00 delimeter) = 42 Bytes total, well under our 64 Byte UART limit
+uint8_t imu_packet_buf[42]; // Buffer to hold the serialized ImuPacket for UART transmission
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
 osThreadId_t defaultTaskHandle;
@@ -103,6 +104,7 @@ void print_val_float(char* label, float val);
 void print_val(char* label, int16_t val);
 void parse_imu_data(uint8_t *imu_buf);
 void parse_mag_data(uint8_t *mag_buf);
+size_t cobs_encode(const uint8_t *input, size_t length, uint8_t *output);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
@@ -285,12 +287,11 @@ void StartMadgwickTask(void *argument)
   /* USER CODE BEGIN StartMadgwickTask */
 
   uint16_t test_counter = 0;
+  volatile uint16_t dropped_packet_counter = 0;
 
   // 1. Initialize local variables
   uint32_t notifyValue = 0;
   float deltat = 1.0f / 104.0f; // Matching our 104Hz ODR
-  float beta = 0.1f;            // Filter gain (0.1 is stable for rovers)
-  float q[4] = {1.0f, 0.0f, 0.0f, 0.0f}; // Initial Quaternion (Identity)
   /* Infinite loop */
   for(;;)
   {
@@ -311,11 +312,6 @@ void StartMadgwickTask(void *argument)
       // Perform ARG-only updates here (e.g., pitch/roll calculation)
       MadgwickAHRSupdateIMU(gx, gy, gz, ax, ay, az);
     }
-
-    // send quaternion over UART
-    char buffer[64];
-    sprintf(buffer, "q: %f, %f, %f, %f\r\n", q0, q1, q2, q3);
-    HAL_UART_Transmit(&huart2, (uint8_t*)buffer, strlen(buffer), 10);
     
     test_counter++;
 
@@ -337,14 +333,76 @@ void StartMadgwickTask(void *argument)
     //end of output for testing
     */
 
+    /*
+    print_val_float("q0: ", q0);
+    print_val_float("q1: ", q1);
+    print_val_float("q2: ", q2);
+    print_val_float("q3: ", q3);
+    HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+    */
+
     // 5. Quaternion is now updated.  Prepare for Serial Bridge.
     //    pack 'q[0,3]' into ROS2 message and/or send over UART for debugging.
+    imu_packet.accel_x = ax;
+    imu_packet.accel_y = ay;
+    imu_packet.accel_z = az;
+    imu_packet.gyro_x = gx;
+    imu_packet.gyro_y = gy;
+    imu_packet.gyro_z = gz;
+    imu_packet.qw = q0;
+    imu_packet.qx = q1;
+    imu_packet.qy = q2;
+    imu_packet.qz = q3;
+
+    size_t encoded_length = cobs_encode((uint8_t*)&imu_packet, sizeof(ImuPacket_t), imu_packet_buf);
+    // ONLY transmit if the previous DMA transfer is finished
+    if (huart2.gState == HAL_UART_STATE_READY) {
+      HAL_UART_Transmit_DMA(&huart2, imu_packet_buf, encoded_length);
+    } else {
+      dropped_packet_counter++;
+      // Optional: Log a "Dropped Packet" count for debugging
+    }
   }
   /* USER CODE END StartMadgwickTask */
 }
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+
+/**
+ * @brief Consistent Overhead Byte Stuffing (COBS) Encoding
+ * @param input: Pointer to the raw data struct
+ * @param length: Size of the raw data (sizeof(ImuPacket_t))
+ * @param output: Pointer to the buffer where encoded data + 0x00 will be stored
+ * @return size_t: The total length of the encoded packet including the delimiter
+ */
+size_t cobs_encode(const uint8_t *input, size_t length, uint8_t *output) {
+    size_t read_index = 0;
+    size_t write_index = 1;
+    size_t code_index = 0;
+    uint8_t code = 1;
+
+    while (read_index < length) {
+        if (input[read_index] == 0) {
+            output[code_index] = code;
+            code = 1;
+            code_index = write_index++;
+            read_index++;
+        } else {
+            output[write_index++] = input[read_index++];
+            code++;
+            if (code == 0xFF) {
+                output[code_index] = code;
+                code = 1;
+                code_index = write_index++;
+            }
+        }
+    }
+    output[code_index] = code;
+    output[write_index] = 0x00; // Add the framing delimiter
+    return write_index + 1;
+}
+
 void print_val(char* label, int16_t val) {
     char msg[64];
     char sign = (val >= 0) ? ' ' : '-';

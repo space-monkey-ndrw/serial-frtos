@@ -154,7 +154,8 @@ void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float 
 
 	// HAL_UART_Transmit(&huart2, (uint8_t*)"AHRS", 2, 10);
 	// HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
-	/* print quaternion values  for debugging 
+	// print quaternion values  for debugging 
+	/*
 	print_val2("q0: ", q0);
 	print_val2("q1: ", q1);
 	print_val2("q2: ", q2);
@@ -257,9 +258,10 @@ void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, flo
 	q3 /= recipNorm;
 	testCounter++;
 
-	/* print quaternion values for debugging 
+	// print quaternion values for debugging 
 	// HAL_UART_Transmit(&huart2, (uint8_t*)"IMU", 2, 10);
 	// HAL_UART_Transmit(&huart2, (uint8_t*)"\r\n", 2, 10);
+	/*
 	print_val2("q0: ", q0);
 	print_val2("q1: ", q1);
 	print_val2("q2: ", q2);
