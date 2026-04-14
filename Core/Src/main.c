@@ -39,6 +39,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define SERIAL_RX_BUF_SIZE 64
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,6 +55,9 @@ __IO uint32_t BspButtonState = BUTTON_RELEASED;
 uint8_t imu_buf[12]; // 6 bytes for Gyro, 6 for Accel
 uint8_t mag_buf[6];  // 6 bytes for Mag
 volatile uint8_t mag_pending = 0;
+extern osThreadId_t madgwickTaskHandle; // IMU data callback - from app_freertos.c
+extern osThreadId_t motorCtrlTaskHandle; // Motor control task handle - from app_freertos.c
+extern uint8_t motor_rx_buf[SERIAL_RX_BUF_SIZE]; // UART reception buffer for motor control commands - from app_freertos.c
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -108,6 +112,7 @@ int main(void)
   // testing code below
   //uncommend the line below to restore non-testing code
   // HAL_TIM_Base_Start_IT(&htim3); // Start timer for periodic sensor reading (IMU) task
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart2, motor_rx_buf, SERIAL_RX_BUF_SIZE); // Start UART DMA reception for motor control commands
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -204,9 +209,6 @@ void SystemClock_Config(void)
 void* __wrap_malloc(size_t size) { return pvPortMalloc(size); }
 void __wrap_free(void* ptr) { vPortFree(ptr); }
 
-/* --- IMU DATA CALLBACK --- */
-extern osThreadId_t madgwickTaskHandle; // From app_freertos.c
-
 /**
   * @brief Override the __weak HAL function to wake our Madgwick Task
   */
@@ -261,6 +263,24 @@ void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c) {
     if (hi2c->Instance == I2C1) {
         // Start reading 12 bytes: Accel (6) + Gyro (6)
         HAL_I2C_Master_Receive_DMA(hi2c, LSM6DSOX_sADDR, imu_buf, 12);
+    }
+}
+
+// this is called when the UART line goes IDLE (end of packet)
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size) {
+    if (huart->Instance == USART2) {
+        // Process the received command in uart_rx_buf here
+        // Size parameter tells you how many bytes were received before the IDLE event
+        // You can parse commands and set motor speeds accordingly
+      // Notify the Motor Task that data is ready
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+      // pass the size (num of Bytes) as the notification value
+      xTaskNotifyFromISR((TaskHandle_t)motorCtrlTaskHandle, 
+                           (uint32_t)Size, 
+                           eSetValueWithOverwrite, 
+                           &xHigherPriorityTaskWoken);
+      // context switch if needed so the Motor Task runs immediately
+      portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
     }
 }
 

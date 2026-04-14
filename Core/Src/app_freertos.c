@@ -25,9 +25,13 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <stdio.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include <math.h>
 #include "tim.h"
 #include "stm32g4xx_nucleo.h"
-#include <stdio.h>
 #include "MadgwickAHRS.h"
 #include "IMUinfo.h"
 /* USER CODE END Includes */
@@ -44,7 +48,8 @@ typedef struct __attribute__((packed)) {
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-extern UART_HandleTypeDef huart2;
+#define MOTOR_MAX_PWM 99
+#define SERIAL_RX_BUF_SIZE 64
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -54,6 +59,8 @@ extern UART_HandleTypeDef huart2;
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+uint8_t motor_rx_buf[SERIAL_RX_BUF_SIZE]; // Buffer for UART reception
+extern UART_HandleTypeDef huart2;
 extern __IO uint32_t BspButtonState;
 extern I2C_HandleTypeDef hi2c1; // Declare the I2C handle defined in i2c.c
 extern uint8_t imu_buf[12]; // 6 bytes for Gyro, 6 for Accel
@@ -88,6 +95,13 @@ const osThreadAttr_t madgwickTask_attributes = {
   .priority = (osPriority_t) osPriorityHigh,
   .stack_size = 512 * 4
 };
+/* Definitions for motorCtrlTask */
+osThreadId_t motorCtrlTaskHandle;
+const osThreadAttr_t motorCtrlTask_attributes = {
+  .name = "motorCtrlTask",
+  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 128 * 4
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -105,10 +119,12 @@ void print_val(char* label, int16_t val);
 void parse_imu_data(uint8_t *imu_buf);
 void parse_mag_data(uint8_t *mag_buf);
 size_t cobs_encode(const uint8_t *input, size_t length, uint8_t *output);
+size_t cobs_decode(const uint8_t *input, uint8_t *output, size_t length);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
 void StartMadgwickTask(void *argument);
+void StartMotorCtrlTask(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -172,6 +188,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of madgwickTask */
   madgwickTaskHandle = osThreadNew(StartMadgwickTask, NULL, &madgwickTask_attributes);
+
+  /* creation of motorCtrlTask */
+  motorCtrlTaskHandle = osThreadNew(StartMotorCtrlTask, NULL, &motorCtrlTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -366,6 +385,63 @@ void StartMadgwickTask(void *argument)
   /* USER CODE END StartMadgwickTask */
 }
 
+/* USER CODE BEGIN Header_StartMotorCtrlTask */
+/**
+* @brief Function implementing the motorCtrlTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartMotorCtrlTask */
+void StartMotorCtrlTask(void *argument)
+{
+  /* USER CODE BEGIN StartMotorCtrlTask */
+
+  float left_cmd = 0.0f;
+  float right_cmd = 0.0f;
+  uint8_t decoded_buf[16]; // buffer for decoded floats
+  uint32_t received_size = 0;
+
+  /* Infinite loop */
+  for(;;)
+  {
+    // wait for notification and capture the size passed from vTaskNotifyGiveFromISR
+    // use 500ms timeout as safety watchdog
+    received_size = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
+
+    if (received_size == 10) { // We expect 10 bytes: 1 COBS code byte + 8 data bytes + 1 delimiter
+      // COBS decode - need to implement
+      cobs_decode(motor_rx_buf, decoded_buf, received_size-1); // Exclude the delimiter from decoding
+      // Unpack: convert bytes to floats
+      memcpy(&left_cmd, &decoded_buf[0], 4);
+      memcpy(&right_cmd, &decoded_buf[4], 4);
+
+      if (left_cmd > 0) {
+        Motor_A_Fwd((int)left_cmd);
+      } else if (left_cmd < 0) {
+        Motor_A_Back((int)(-left_cmd)); // invert for reverse
+      } else {
+        Motor_A_Stop();
+      }
+
+      if (right_cmd > 0) {
+        Motor_B_Fwd((int)right_cmd);
+      } else if (right_cmd < 0) {
+        Motor_B_Back((int)(-right_cmd)); // invert for reverse
+      } else {
+        Motor_B_Stop();
+      }
+
+      // restart DMA for next packet
+      HAL_UARTEx_ReceiveToIdle_DMA(&huart2, motor_rx_buf, sizeof(motor_rx_buf));
+
+    } else {
+      // Optional: Implement a timeout behavior, e.g., stop motors if no command received for 500ms
+      Motors_Stop();
+    }
+  }
+  /* USER CODE END StartMotorCtrlTask */
+}
+
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
 
@@ -401,6 +477,37 @@ size_t cobs_encode(const uint8_t *input, size_t length, uint8_t *output) {
     output[code_index] = code;
     output[write_index] = 0x00; // Add the framing delimiter
     return write_index + 1;
+}
+
+/**
+ * @brief Consistent Overhead Byte Stuffing (COBS) decoding
+ * @param input: Pointer to the raw data struct
+ * @param output: Pointer to the buffer where encoded data + 0x00 will be stored
+ * @param length: Size of the raw data (sizeof(ImuPacket_t))
+ * @return size_t: The total length of the encoded packet including the delimiter
+ */
+size_t cobs_decode(const uint8_t *input, uint8_t *output, size_t length) {
+    const uint8_t *start = output;
+    while (length > 0)
+    {
+        uint8_t code = *input++;
+        if (code == 0) break; // Should not happen in a valid COBS packet before the end
+        length--;
+        
+        if (code > length + 1) return 0; // Error: packet is too short for the code provided
+
+        for (uint8_t i = 1; i < code; i++)
+        {
+            *output++ = *input++;
+            length--;
+        }
+
+        if (code < 0xFF && length > 0)
+        {
+            *output++ = 0;
+        }
+    }
+    return (size_t)(output - start);
 }
 
 void print_val(char* label, int16_t val) {
@@ -478,56 +585,62 @@ void parse_mag_data(uint8_t mag_buf[6]) {
 
 void Motor_A_Fwd(int speed)
 {
-	if ((speed > 249) | (speed < 0))
+	if ((speed > MOTOR_MAX_PWM) | (speed < 0))
 	{
 		return;
 	}
 	HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_RESET); // AIN1 LOW
   HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_SET);   // AIN2 HIGH
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, speed);    // % speed (speed/1000)
+  htim1.Instance->CCR1 = speed; // Direct register access for faster updates
 }
 
 void Motor_A_Back(int speed)
 {
-	if ((speed > 249) | (speed < 0))
+	if ((speed > MOTOR_MAX_PWM) | (speed < 0))
 	{
 		return;
 	}
 	HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_SET); // AIN1 HIGH
 	HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);   // AIN2 LOW
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, speed);    // % speed (speed/1000)
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, speed);    // % speed (speed/MOTOR_MAX_PWM)
 }
 
 void Motor_A_Stop(void)
 {
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, 0);      // 0% Speed
+	HAL_GPIO_WritePin(AIN1_GPIO_Port, AIN1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(AIN2_GPIO_Port, AIN2_Pin, GPIO_PIN_RESET);
+  
+  htim1.Instance->CCR1 = 0; // Ensure PWM duty cycle is also set to 0
 }
 
 void Motor_B_Fwd(int speed)
 {
-	if ((speed > 249) | (speed < 0))
+	if ((speed > MOTOR_MAX_PWM) | (speed < 0))
 	{
 		return;
 	}
 	HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_RESET); // BIN1 LOW
 	HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_SET);   // BIN2 HIGH
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, speed);    // % speed (speed/1000)
+	htim1.Instance->CCR2 = speed; // Direct register access for faster updates
 }
 
 void Motor_B_Back(int speed)
 {
-	if ((speed > 249) | (speed < 0))
+	if ((speed > MOTOR_MAX_PWM) | (speed < 0))
 	{
 		return;
 	}
 	HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_SET); // BIN1 HIGH
 	HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_RESET);   // BIN2 LOW
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, speed);    // % speed (speed/1000)
+	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, speed);    // % speed (speed/MOTOR_MAX_PWM)
 }
 
 void Motor_B_Stop(void)
 {
-	__HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_2, 0);      // 0% Speed
+  HAL_GPIO_WritePin(BIN1_GPIO_Port, BIN1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(BIN2_GPIO_Port, BIN2_Pin, GPIO_PIN_RESET);
+  
+  htim1.Instance->CCR2 = 0; // Ensure PWM duty cycle is also set to 0
 }
 
 void Motors_Fwd(int speed)
